@@ -9,6 +9,9 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    outputs:
+      outlet_count: ${{ steps.scraper.outputs.count }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,7 +20,11 @@ jobs:
           python-version: '3.x'
 
       - name: Run scraper
-        run: python scrape_pos_outlets.py
+        id: scraper
+        run: |
+          python scrape_pos_outlets.py | tee /tmp/scraper_out.txt
+          count=$(grep -oP 'Total outlets fetched: \K\d+' /tmp/scraper_out.txt || echo "0")
+          echo "count=$count" >> $GITHUB_OUTPUT
 
       - name: Commit and push data
         env:
@@ -29,3 +36,24 @@ jobs:
           git add -A
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update: $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
+
+      - name: Send Teams Alert - Success
+        if: success()
+        env:
+          WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
+          COUNT: ${{ steps.scraper.outputs.count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -H "Content-Type: application/json" -d "{
+            \"text\": \"✅ POS Scraper: ${COUNT} outlets fetched | [View Run](${RUN_URL})\"
+          }" $WEBHOOK
+
+      - name: Send Teams Alert - Failure
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -H "Content-Type: application/json" -d "{
+            \"text\": \"❌ POS Scraper: Failed | [View Logs](${RUN_URL})\"
+          }" $WEBHOOK

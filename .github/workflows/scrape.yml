@@ -35,6 +35,7 @@ jobs:
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
           git add -A
           git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git pull --rebase || true
           git push
 
       - name: Send Teams Alert - Success

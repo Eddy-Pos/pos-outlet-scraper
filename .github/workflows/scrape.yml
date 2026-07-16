@@ -1,10 +1,6 @@
 name: Scrape POS Outlets
 
 on:
-  schedule:
-    - cron: '31 0 * * *'   # 08:31 MYT
-    - cron: '1 4 * * *'    # 12:01 MYT
-    - cron: '1 9 * * *'    # 17:01 MYT
   workflow_dispatch:
 
 permissions:

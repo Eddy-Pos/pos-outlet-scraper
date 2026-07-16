@@ -64,6 +64,34 @@ latest.json
 3. Add **Script Property**: `GITHUB_TOKEN` = your token
 4. Add time-driven trigger: every 5 minutes
 
+## Data Storage
+
+- **Cloud (source of truth):** GitHub repo → `data/YYYY-MM-DD/`
+- **Local:** You run `git pull` to download the latest files to your laptop
+
+No data is stored on your machine until you explicitly pull it.
+
+## Syncing to Local
+
+To download the latest data files:
+
+```bash
+git pull
+```
+
+### Optional: Auto-sync every 5 minutes (Windows Task Scheduler)
+
+If you keep your laptop on during the day, set a lightweight task that just pulls:
+
+```
+Task: git pull
+Repeat: Every 5 minutes
+Action: C:\Program Files\Git\bin\git.exe pull
+Args: -C "C:\path\to\your\repo"
+```
+
+This runs only `git pull` (no Python, no scraping) — very lightweight.
+
 ### Local Development
 - Run `python scrape_pos_outlets.py` manually to test
 - `git pull` to sync latest data files from GitHub

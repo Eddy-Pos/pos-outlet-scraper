@@ -23,7 +23,7 @@ jobs:
         id: scraper
         run: |
           python scrape_pos_outlets.py | tee /tmp/scraper_out.txt
-          count=$(grep -oP 'Total outlets fetched: \K\d+' /tmp/scraper_out.txt || echo "0")
+          count=$(sed -n 's/.* \([0-9]*\) outlets.*/\1/p' /tmp/scraper_out.txt | tail -1 || echo "0")
           echo "count=$count" >> $GITHUB_OUTPUT
 
       - name: Commit and push data

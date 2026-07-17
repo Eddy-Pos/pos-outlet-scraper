@@ -87,3 +87,29 @@ python historical.py --range 3m # fetch 3-month history
 ```bash
 git pull
 ```
+
+## Next Steps — Enable Teams Alerts
+
+The workflow sends a Teams notification on every run, but it needs your Teams webhook URL stored as a **repository secret**.
+
+### 1. Create a Teams webhook
+1. Open Microsoft Teams
+2. Go to the channel where you want alerts (e.g. your gold price channel)
+3. Click **•••** (More options) → **Connectors**
+4. Find **Incoming Webhook** → click **Configure**
+5. Name it `Gold Price Scraper`, create the webhook
+6. Copy the webhook URL (it looks like `https://outlook.office.com/webhook/...`)
+
+### 2. Add it as a GitHub secret
+1. Go to your repo on GitHub: `https://github.com/Eddy-Pos/pos-outlet-scraper`
+2. Click **Settings** → **Secrets and variables** → **Actions**
+3. Click **New repository secret**
+4. **Name:** `TEAMS_WEBHOOK`
+5. **Value:** Paste the webhook URL you copied from Teams
+6. Click **Add secret**
+
+### 3. Verify it works
+1. Go to the **Actions** tab of your repo
+2. Click **Scrape Gold Price** workflow
+3. Click **Run workflow** → **Run workflow** (manual trigger)
+4. After it completes (~30s), check your Teams channel for a gold price alert

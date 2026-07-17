@@ -1,3 +1,4 @@
 scraper.log
 __pycache__/
 *.pyc
+prices.jsonl

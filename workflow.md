@@ -1,21 +1,18 @@
-# POS Outlet Scraper — Workflow
+# POS ArRahnu Gold-i Scraper — Workflow
 
 ## Architecture
 
 ```
-Google Apps Script (every 5 min)
+GitHub Actions (hourly cron)
         │
-        │ POST /repos/.../dispatches (workflow_dispatch)
+        │ .github/workflows/scrape_gold.yml
         ▼
-GitHub Actions (runs scrape.yml)
-        │
-        │ python scrape_pos_outlets.py
-        ▼
-Fetches POS API → https://www-api.pos.com.my/api/outlets
-        │
-        ├─ Saves data/YYYY-MM-DD/outlets_YYYYMMDD_HHmmss.json
-        ├─ Updates latest.json
-        ├─ Auto-cleans files older than 2 days
+  ┌─ capture_live_price.py  (one-shot WebSocket → 1 tick)
+  │   ├─ Saves data/YYYY-MM-DD/gold_YYYYMMDD_HHmmss.json
+  │   └─ Updates latest.json
+  │
+  └─ historical.py           (daily price history, on demand)
+      └─ Saves historical_*.json / .csv
         │
         ▼
 Commits & pushes to GitHub repo
@@ -25,73 +22,68 @@ Commits & pushes to GitHub repo
 
 | Source | Schedule | Status |
 |--------|----------|--------|
-| Google Apps Script | Every 5 minutes | ✅ Primary |
+| GitHub Actions cron | Every hour (`0 * * * *`) | ✅ Primary |
+| Manual `workflow_dispatch` | On demand | ✅ |
 
 ## Components
 
-### 1. Google Apps Script
-- Hosted at `script.google.com`
-- Calls GitHub API `workflow_dispatch` every 5 minutes
-- Token stored in **Script Properties** (not in code)
-- Run history visible under **Executions** tab
-
-### 2. GitHub Actions (`.github/workflows/scrape.yml`)
-- Triggered by `workflow_dispatch` from Apps Script
-- Runs `scrape_pos_outlets.py`
+### 1. GitHub Actions (`.github/workflows/scrape_gold.yml`)
+- Runs hourly via cron
+- Installs Python dependencies (`requests`, `websockets`)
+- Runs `capture_live_price.py`
 - Commits new data to the repo
+- Sends optional Teams alert with price
 
-### 3. Scraper (`scrape_pos_outlets.py`)
-- Fetches 20 pages concurrently (100 items/page = 1,968 outlets)
-- Saves JSON with timestamp in filename
-- Updates `latest.json` with latest snapshot
-- Deletes files older than 2 days
+### 2. Live Snapshot (`capture_live_price.py`)
+- Fetches JWT from the landing page
+- Connects to WebSocket, captures **1 price tick**, exits
+- Saves to `latest.json` (overwrites) + `data/YYYY-MM-DD/gold_YYYYMMDD_HHmmss.json`
+
+### 3. Continuous Scraper (`scraper.py`)
+- **For local use only** — connects continuously, appends to `prices.jsonl`
+- Run manually: `python scraper.py` (Ctrl+C to stop)
+
+### 4. Historical Scraper (`historical.py`)
+- Fetches daily closing prices (up to ~3 months)
+- Run on demand: `python historical.py --range all`
 
 ## Output Structure
 
 ```
+latest.json                    ← Latest live price tick (overwritten)
+prices.jsonl                   ← Continuous tick log (local only, gitignored)
+historical_1w.json / .csv      ← Daily history (1-week preset)
+historical_1m.json / .csv      ← Daily history (1-month preset)
+historical_3m.json / .csv      ← Daily history (3-months preset)
 data/
 └── YYYY-MM-DD/
-    ├── outlets_YYYYMMDD_HHmmss.json
-    └── outlets_YYYYMMDD_HHmmss.json
-latest.json
+    └── gold_YYYYMMDD_HHmmss.json
 ```
 
 ## Setup
 
-### Google Apps Script
-1. Go to https://script.google.com
-2. Create new project, paste code from `google_apps_script.gs`
-3. Add **Script Property**: `GITHUB_TOKEN` = your token
-4. Add time-driven trigger: every 5 minutes
+### GitHub Actions
+The workflow is self-contained — no external trigger needed. It runs on GitHub's hosted runners.
+
+To enable Teams notifications, add a repository secret:
+- **Name:** `TEAMS_WEBHOOK`
+- **Value:** Your Teams webhook URL
+
+### Local Development
+```bash
+git clone https://github.com/Eddy-Pos/pos-outlet-scraper.git
+cd pos-outlet-scraper
+pip install requests websockets
+python capture_live_price.py    # one-shot test
+python scraper.py               # continuous stream
+python historical.py --range 3m # fetch 3-month history
+```
 
 ## Data Storage
-
-- **Cloud (source of truth):** GitHub repo → `data/YYYY-MM-DD/`
-- **Local:** You run `git pull` to download the latest files to your laptop
-
-No data is stored on your machine until you explicitly pull it.
+- **Cloud (source of truth):** GitHub repo → `data/YYYY-MM-DD/`, `latest.json`, `historical_*.json`
+- **Local:** Run `git pull` to download the latest files to your machine
 
 ## Syncing to Local
-
-To download the latest data files:
-
 ```bash
 git pull
 ```
-
-### Optional: Auto-sync every 5 minutes (Windows Task Scheduler)
-
-If you keep your laptop on during the day, set a lightweight task that just pulls:
-
-```
-Task: git pull
-Repeat: Every 5 minutes
-Action: C:\Program Files\Git\bin\git.exe pull
-Args: -C "C:\path\to\your\repo"
-```
-
-This runs only `git pull` (no Python, no scraping) — very lightweight.
-
-### Local Development
-- Run `python scrape_pos_outlets.py` manually to test
-- `git pull` to sync latest data files from GitHub

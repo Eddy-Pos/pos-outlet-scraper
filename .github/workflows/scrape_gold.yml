@@ -1,6 +1,8 @@
-name: Scrape POS Outlets
+name: Scrape Gold Price
 
 on:
+  schedule:
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -9,9 +11,6 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    outputs:
-      outlet_count: ${{ steps.scraper.outputs.count }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -19,12 +18,15 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Run scraper
-        id: scraper
+      - name: Install dependencies
+        run: pip install requests websockets
+
+      - name: Capture live gold price
+        id: capture
         run: |
-          python scrape_pos_outlets.py | tee /tmp/scraper_out.txt
-          count=$(sed -n 's/.* \([0-9]*\) outlets.*/\1/p' /tmp/scraper_out.txt | tail -1 || echo "0")
-          echo "count=$count" >> $GITHUB_OUTPUT
+          python capture_live_price.py 2>&1 | tee /tmp/capture_out.txt
+          price=$(grep -oP 'Buy RM \K[\d.]+' /tmp/capture_out.txt | tail -1 || echo "N/A")
+          echo "price=$price" >> $GITHUB_OUTPUT
 
       - name: Commit and push data
         env:
@@ -34,7 +36,7 @@ jobs:
           git config user.email "github-actions@github.com"
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
           git add -A
-          git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git diff --quiet && git diff --staged --quiet || git commit -m "Gold price update: RM ${{ steps.capture.outputs.price }}/g ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           git pull --rebase || true
           git push
 
@@ -42,11 +44,11 @@ jobs:
         if: success()
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
-          COUNT: ${{ steps.scraper.outputs.count }}
+          PRICE: ${{ steps.capture.outputs.price }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           curl -H "Content-Type: application/json" -d "{
-            \"text\": \"✅ POS Scraper: ${COUNT} outlets fetched | [View Run](${RUN_URL})\"
+            \"text\": \"🟡 Gold Price: RM ${PRICE}/g | [View Run](${RUN_URL})\"
           }" $WEBHOOK
 
       - name: Send Teams Alert - Failure
@@ -56,5 +58,5 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           curl -H "Content-Type: application/json" -d "{
-            \"text\": \"❌ POS Scraper: Failed | [View Logs](${RUN_URL})\"
+            \"text\": \"🔴 Gold Scraper Failed | [View Logs](${RUN_URL})\"
           }" $WEBHOOK

@@ -23,9 +23,15 @@ jobs:
 
       - name: Capture live gold price
         id: capture
+        shell: bash
         run: |
+          set -o pipefail
           python capture_live_price.py 2>&1 | tee /tmp/capture_out.txt
-          price=$(grep -oP 'Buy RM \K[\d.]+' /tmp/capture_out.txt | tail -1 || echo "N/A")
+          price=$(grep -oP 'Buy RM \K[\d.]+' /tmp/capture_out.txt | tail -1)
+          if [ -z "$price" ]; then
+            echo "ERROR: No price found in output"
+            exit 1
+          fi
           echo "price=$price" >> $GITHUB_OUTPUT
 
       - name: Commit and push data

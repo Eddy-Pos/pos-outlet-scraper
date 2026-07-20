@@ -21,6 +21,18 @@ jobs:
       - name: Install dependencies
         run: pip install requests websockets
 
+      - name: Diagnostic - check connectivity
+        shell: bash
+        run: |
+          echo "## Python version" >> $GITHUB_STEP_SUMMARY
+          python --version >> $GITHUB_STEP_SUMMARY
+          echo "## HTTP ping" >> $GITHUB_STEP_SUMMARY
+          curl -sk -o /dev/null -w "HTTP %{http_code} to landing page\n" https://posarrahnugold.ace2u.com/index-landing.php >> $GITHUB_STEP_SUMMARY
+          echo "## DNS resolution" >> $GITHUB_STEP_SUMMARY
+          nslookup posarrahnugoldprodapi.ace2u.com >> $GITHUB_STEP_SUMMARY 2>&1 || echo "nslookup failed" >> $GITHUB_STEP_SUMMARY
+          echo "## Certificate check" >> $GITHUB_STEP_SUMMARY
+          echo | openssl s_client -connect posarrahnugoldprodapi.ace2u.com:443 -servername posarrahnugoldprodapi.ace2u.com 2>&1 | head -20 >> $GITHUB_STEP_SUMMARY
+
       - name: Capture live gold price
         id: capture
         shell: bash

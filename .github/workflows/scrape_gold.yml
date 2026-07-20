@@ -27,9 +27,11 @@ jobs:
         run: |
           set -o pipefail
           python capture_live_price.py 2>&1 | tee /tmp/capture_out.txt
+          echo "### Script Output" >> $GITHUB_STEP_SUMMARY
+          cat /tmp/capture_out.txt >> $GITHUB_STEP_SUMMARY
           price=$(grep -oP 'Buy RM \K[\d.]+' /tmp/capture_out.txt | tail -1)
           if [ -z "$price" ]; then
-            echo "ERROR: No price found in output"
+            echo "### ERROR: No price found" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           echo "price=$price" >> $GITHUB_OUTPUT

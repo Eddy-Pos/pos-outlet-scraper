@@ -24,14 +24,17 @@ jobs:
       - name: Diagnostic - check connectivity
         shell: bash
         run: |
-          echo "## Python version" >> $GITHUB_STEP_SUMMARY
-          python --version >> $GITHUB_STEP_SUMMARY
-          echo "## HTTP ping" >> $GITHUB_STEP_SUMMARY
-          curl -sk -o /dev/null -w "HTTP %{http_code} to landing page\n" https://posarrahnugold.ace2u.com/index-landing.php >> $GITHUB_STEP_SUMMARY
-          echo "## DNS resolution" >> $GITHUB_STEP_SUMMARY
-          nslookup posarrahnugoldprodapi.ace2u.com >> $GITHUB_STEP_SUMMARY 2>&1 || echo "nslookup failed" >> $GITHUB_STEP_SUMMARY
-          echo "## Certificate check" >> $GITHUB_STEP_SUMMARY
-          echo | openssl s_client -connect posarrahnugoldprodapi.ace2u.com:443 -servername posarrahnugoldprodapi.ace2u.com 2>&1 | head -20 >> $GITHUB_STEP_SUMMARY
+          set -e
+          echo "## Python" >> $GITHUB_STEP_SUMMARY
+          python --version >> $GITHUB_STEP_SUMMARY 2>&1
+          echo "## HTTP test (timeout 10s)" >> $GITHUB_STEP_SUMMARY
+          curl -sk --connect-timeout 10 -o /dev/null -w "HTTP %{http_code}\n" https://posarrahnugold.ace2u.com/index-landing.php >> $GITHUB_STEP_SUMMARY 2>&1 || echo "CURL FAILED" >> $GITHUB_STEP_SUMMARY
+          echo "## DNS test" >> $GITHUB_STEP_SUMMARY
+          host posarrahnugoldprodapi.ace2u.com >> $GITHUB_STEP_SUMMARY 2>&1 || echo "DNS FAILED" >> $GITHUB_STEP_SUMMARY
+          echo "## Quick port test" >> $GITHUB_STEP_SUMMARY
+          timeout 5 bash -c 'echo > /dev/tcp/posarrahnugoldprodapi.ace2u.com/443 && echo "PORT 443 OPEN"' 2>&1 >> $GITHUB_STEP_SUMMARY || echo "PORT 443 CLOSED" >> $GITHUB_STEP_SUMMARY
+          echo "## Public IP" >> $GITHUB_STEP_SUMMARY
+          curl -s --connect-timeout 5 https://httpbin.org/ip >> $GITHUB_STEP_SUMMARY 2>&1 || echo "IP CHECK FAILED" >> $GITHUB_STEP_SUMMARY
 
       - name: Capture live gold price
         id: capture

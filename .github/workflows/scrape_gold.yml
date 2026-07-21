@@ -40,13 +40,19 @@ jobs:
         id: capture
         shell: bash
         run: |
-          set -o pipefail
+          set +e
           python capture_live_price.py 2>&1 | tee /tmp/capture_out.txt
-          echo "### Script Output" >> $GITHUB_STEP_SUMMARY
+          rc=$?
+          set -e
+          echo "### Script Output (exit code: $rc)" >> $GITHUB_STEP_SUMMARY
           cat /tmp/capture_out.txt >> $GITHUB_STEP_SUMMARY
+          if [ $rc -ne 0 ]; then
+            echo "### Python script exited with code $rc" >> $GITHUB_STEP_SUMMARY
+            exit $rc
+          fi
           price=$(grep -oP 'Buy RM \K[\d.]+' /tmp/capture_out.txt | tail -1)
           if [ -z "$price" ]; then
-            echo "### ERROR: No price found" >> $GITHUB_STEP_SUMMARY
+            echo "### ERROR: No price found in output" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           echo "price=$price" >> $GITHUB_OUTPUT

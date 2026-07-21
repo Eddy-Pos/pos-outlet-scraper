@@ -26,9 +26,8 @@ jobs:
         shell: powershell
         run: |
           $outfile = "$env:RUNNER_TEMP\capture_out.txt"
-          $raw = python capture_live_price.py 2>&1
+          cmd /c "python capture_live_price.py 2>&1" | ForEach-Object { "$_" } | Out-File -FilePath $outfile
           $rc = $LASTEXITCODE
-          $raw | ForEach-Object { "$_" } | Out-File -FilePath $outfile
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Script Output (exit code: $rc)"
           Get-Content $outfile | Add-Content -Path $env:GITHUB_STEP_SUMMARY

@@ -21,6 +21,38 @@ jobs:
       - name: Install dependencies
         run: pip install requests websockets
 
+      - name: Network diagnostics
+        shell: bash
+        run: |
+          S="$GITHUB_STEP_SUMMARY"
+          echo "### Network Diagnostics" >> "$S"
+          echo "" >> "$S"
+
+          echo "**1. DNS resolution (host)**" >> "$S"
+          host posarrahnugold.ace2u.com 2>&1 | tee -a "$S"
+          echo "" >> "$S"
+
+          echo "**2. DNS resolution (nslookup)**" >> "$S"
+          nslookup posarrahnugold.ace2u.com 2>&1 | tee -a "$S"
+          echo "" >> "$S"
+
+          echo "**3. HTTP connectivity**" >> "$S"
+          curl -v --connect-timeout 10 --max-time 15 -k \
+            https://posarrahnugold.ace2u.com/index-landing.php 2>&1 | head -60 | tee -a "$S"
+          echo "" >> "$S"
+
+          echo "**4. WebSocket endpoint**" >> "$S"
+          curl -v --connect-timeout 10 --max-time 15 -k \
+            -H "Connection: Upgrade" \
+            -H "Upgrade: websocket" \
+            -H "Sec-WebSocket-Version: 13" \
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            "https://posarrahnugoldprodapi.ace2u.com/mygtp.php?version=1.0my&action=pricestream" \
+            2>&1 | head -60 | tee -a "$S"
+
+          echo "" >> "$S"
+          echo "--- diagnostics complete ---" >> "$S"
+
       - name: Capture live gold price
         id: capture
         shell: bash

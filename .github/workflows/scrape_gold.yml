@@ -1,14 +1,19 @@
 name: Scrape Gold Price
 
 on:
+  schedule:
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+env:
+  PYTHONUTF8: 1
+
 jobs:
   scrape:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -17,55 +22,24 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install requests websockets
-
-      - name: Network diagnostics
         shell: bash
-        run: |
-          S="$GITHUB_STEP_SUMMARY"
-          echo "### Network Diagnostics" >> "$S"
-          echo "" >> "$S"
-
-          echo "**1. DNS resolution (host)**" >> "$S"
-          host posarrahnugold.ace2u.com 2>&1 | tee -a "$S"
-          echo "" >> "$S"
-
-          echo "**2. DNS resolution (nslookup)**" >> "$S"
-          nslookup posarrahnugold.ace2u.com 2>&1 | tee -a "$S"
-          echo "" >> "$S"
-
-          echo "**3. HTTP connectivity**" >> "$S"
-          curl -v --connect-timeout 10 --max-time 15 -k \
-            https://posarrahnugold.ace2u.com/index-landing.php 2>&1 | head -60 | tee -a "$S"
-          echo "" >> "$S"
-
-          echo "**4. WebSocket endpoint**" >> "$S"
-          curl -v --connect-timeout 10 --max-time 15 -k \
-            -H "Connection: Upgrade" \
-            -H "Upgrade: websocket" \
-            -H "Sec-WebSocket-Version: 13" \
-            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-            "https://posarrahnugoldprodapi.ace2u.com/mygtp.php?version=1.0my&action=pricestream" \
-            2>&1 | head -60 | tee -a "$S"
-
-          echo "" >> "$S"
-          echo "--- diagnostics complete ---" >> "$S"
+        run: pip install requests websockets
 
       - name: Capture live gold price
         id: capture
         shell: bash
         run: |
+          outfile="$RUNNER_TEMP/capture_out.txt"
           set +e
-          python capture_live_price.py 2>&1 | tee /tmp/capture_out.txt
+          python capture_live_price.py 2>&1 | tee "$outfile"
           rc=${PIPESTATUS[0]}
           set -e
 
           echo "### Script Output (exit code: $rc)" >> $GITHUB_STEP_SUMMARY
-          cat /tmp/capture_out.txt >> $GITHUB_STEP_SUMMARY
+          cat "$outfile" >> $GITHUB_STEP_SUMMARY
 
           echo "exit_code=$rc" >> $GITHUB_OUTPUT
-          # Capture last error line for debugging
-          grep -oP '(ERROR|SCRIPT|SERVER).*' /tmp/capture_out.txt | tail -1 | while read line; do
+          grep -oP '(ERROR|SCRIPT|SERVER).*' "$outfile" | tail -1 | while read line; do
             echo "error_msg=$(echo "$line" | sed 's/[^a-zA-Z0-9 _.:-]//g')" >> $GITHUB_OUTPUT
           done
           if [ $rc -eq 2 ]; then
@@ -78,13 +52,14 @@ jobs:
             exit $rc
           fi
 
-          price=$(grep -oP 'Buy RM \K[\d.]+' /tmp/capture_out.txt | tail -1)
+          price=$(grep -oP 'Buy RM \K[\d.]+' "$outfile" | tail -1)
           echo "price=$price" >> $GITHUB_OUTPUT
 
       - name: Commit and push data
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -96,6 +71,7 @@ jobs:
 
       - name: Teams Alert — Success
         if: success()
+        shell: bash
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           PRICE: ${{ steps.capture.outputs.price }}
@@ -107,6 +83,7 @@ jobs:
 
       - name: Teams Alert — Server Down
         if: failure() && steps.capture.outputs.error_type == 'server'
+        shell: bash
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -117,6 +94,7 @@ jobs:
 
       - name: Teams Alert — Script Error
         if: failure() && steps.capture.outputs.error_type == 'script'
+        shell: bash
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

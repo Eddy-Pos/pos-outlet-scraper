@@ -36,8 +36,7 @@ if ($exitCode -eq 0) {
         $msg = "Gold price update: RM ${price}/g ($(Get-Date -Format 'yyyy-MM-dd HH:mm UTC'))"
         Write-Log "Committing: $msg"
         & git commit -m $msg 2>&1 | Out-File -FilePath $LogFile -Append
-        & git pull --rebase 2>&1 | Out-File -FilePath $LogFile -Append
-        & git push 2>&1 | Out-File -FilePath $LogFile -Append
+        & git push origin main 2>&1 | Out-File -FilePath $LogFile -Append
         Write-Log "Push complete"
     } else {
         Write-Log "No changes to commit"

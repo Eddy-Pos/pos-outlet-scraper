@@ -17,92 +17,84 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug environment
-        shell: powershell
-        run: |
-          Write-Output "### Debug Info" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "python: $(python --version 2>&1)" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "pip: $(python -m pip --version 2>&1)" >> $env:GITHUB_STEP_SUMMARY
-          Write-Output "git: $(git --version 2>&1)" >> $env:GITHUB_STEP_SUMMARY
-
       - name: Install dependencies
         shell: powershell
         run: python -m pip install requests websockets 2>&1
 
       - name: Capture live gold price
         id: capture
-        shell: bash
+        shell: powershell
         run: |
-          outfile="$RUNNER_TEMP/capture_out.txt"
-          set +e
-          python capture_live_price.py 2>&1 | tee "$outfile"
-          rc=${PIPESTATUS[0]}
-          set -e
+          $outfile = "$env:RUNNER_TEMP\capture_out.txt"
+          python capture_live_price.py 2>&1 | Tee-Object -FilePath $outfile
+          $rc = $LASTEXITCODE
 
-          echo "### Script Output (exit code: $rc)" >> $GITHUB_STEP_SUMMARY
-          cat "$outfile" >> $GITHUB_STEP_SUMMARY
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Script Output (exit code: $rc)"
+          Get-Content $outfile | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-          echo "exit_code=$rc" >> $GITHUB_OUTPUT
-          grep -oP '(ERROR|SCRIPT|SERVER).*' "$outfile" | tail -1 | while read line; do
-            echo "error_msg=$(echo "$line" | sed 's/[^a-zA-Z0-9 _.:-]//g')" >> $GITHUB_OUTPUT
-          done
-          if [ $rc -eq 2 ]; then
-            echo "error_type=server" >> $GITHUB_OUTPUT
-          elif [ $rc -eq 1 ]; then
-            echo "error_type=script" >> $GITHUB_OUTPUT
-          fi
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "exit_code=$rc"
+          $errorLine = Select-String -Path $outfile -Pattern "(ERROR|SCRIPT|SERVER).*" | Select-Object -Last 1
+          if ($errorLine) {
+            $clean = $errorLine.Line -replace '[^a-zA-Z0-9 _.:-]', ''
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "error_msg=$clean"
+          }
+          if ($rc -eq 2) {
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "error_type=server"
+          } elseif ($rc -eq 1) {
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "error_type=script"
+          }
 
-          if [ $rc -ne 0 ]; then
-            exit $rc
-          fi
+          if ($rc -ne 0) { exit $rc }
 
-          price=$(grep -oP 'Buy RM \K[\d.]+' "$outfile" | tail -1)
-          echo "price=$price" >> $GITHUB_OUTPUT
+          $price = Select-String -Path $outfile -Pattern "Buy RM ([\d.]+)" | ForEach-Object { $_.Matches.Groups[1].Value } | Select-Object -Last 1
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "price=$price"
 
       - name: Commit and push data
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
+        shell: powershell
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
+          $token = $env:GITHUB_TOKEN
+          git remote set-url origin "https://x-access-token:${token}@github.com/${{ github.repository }}"
           git add -A
-          git diff --quiet && git diff --staged --quiet || git commit -m "Gold price update: RM ${{ steps.capture.outputs.price }}/g ($(date -u '+%Y-%m-%d %H:%M UTC'))"
-          git pull --rebase || true
-          git push
+          $dirty = git diff --quiet 2>$null; $staged = git diff --staged --quiet 2>$null
+          if (-not ($dirty -and $staged)) {
+            $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm UTC')
+            git commit -m "Gold price update: RM ${{ steps.capture.outputs.price }}/g ($date)"
+            git pull --rebase 2>$null
+            git push
+          }
 
       - name: Teams Alert — Success
         if: success()
-        shell: bash
+        shell: powershell
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           PRICE: ${{ steps.capture.outputs.price }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -H "Content-Type: application/json" -d "{
-            \"text\": \"🟡 Gold Price: RM ${PRICE}/g | [View Run](${RUN_URL})\"
-          }" $WEBHOOK
+          $body = @{ text = "🟡 Gold Price: RM $env:PRICE/g | [View Run]($env:RUN_URL)" } | ConvertTo-Json
+          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json" -ErrorAction SilentlyContinue
 
       - name: Teams Alert — Server Down
         if: failure() && steps.capture.outputs.error_type == 'server'
-        shell: bash
+        shell: powershell
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -H "Content-Type: application/json" -d "{
-            \"text\": \"🔴 Server Unreachable — Gold price server is down or timing out | [View Logs](${RUN_URL})\"
-          }" $WEBHOOK
+          $body = @{ text = "🔴 Server Unreachable — Gold price server is down or timing out | [View Logs]($env:RUN_URL)" } | ConvertTo-Json
+          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json" -ErrorAction SilentlyContinue
 
       - name: Teams Alert — Script Error
         if: failure() && steps.capture.outputs.error_type == 'script'
-        shell: bash
+        shell: powershell
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -H "Content-Type: application/json" -d "{
-            \"text\": \"🔴 Script Error — Gold scraper hit an unexpected error | [View Logs](${RUN_URL})\"
-          }" $WEBHOOK
+          $body = @{ text = "🔴 Script Error — Gold scraper hit an unexpected error | [View Logs]($env:RUN_URL)" } | ConvertTo-Json
+          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json" -ErrorAction SilentlyContinue

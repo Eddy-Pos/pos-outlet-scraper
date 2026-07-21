@@ -17,6 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug environment
+        shell: powershell
+        run: |
+          Write-Output "### Debug Info" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "python: $(python --version 2>&1)" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "pip: $(python -m pip --version 2>&1)" >> $env:GITHUB_STEP_SUMMARY
+          Write-Output "git: $(git --version 2>&1)" >> $env:GITHUB_STEP_SUMMARY
+
       - name: Install dependencies
         shell: powershell
         run: python -m pip install requests websockets 2>&1

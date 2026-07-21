@@ -70,31 +70,37 @@ jobs:
 
       - name: Teams Alert — Success
         if: success()
+        continue-on-error: true
         shell: powershell
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           PRICE: ${{ steps.capture.outputs.price }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if (-not $env:WEBHOOK) { Write-Output "No webhook configured"; return }
           $body = @{ text = "🟡 Gold Price: RM $env:PRICE/g | [View Run]($env:RUN_URL)" } | ConvertTo-Json
-          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json" -ErrorAction SilentlyContinue
+          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json"
 
       - name: Teams Alert — Server Down
         if: failure() && steps.capture.outputs.error_type == 'server'
+        continue-on-error: true
         shell: powershell
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if (-not $env:WEBHOOK) { Write-Output "No webhook configured"; return }
           $body = @{ text = "🔴 Server Unreachable — Gold price server is down or timing out | [View Logs]($env:RUN_URL)" } | ConvertTo-Json
-          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json" -ErrorAction SilentlyContinue
+          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json"
 
       - name: Teams Alert — Script Error
         if: failure() && steps.capture.outputs.error_type == 'script'
+        continue-on-error: true
         shell: powershell
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if (-not $env:WEBHOOK) { Write-Output "No webhook configured"; return }
           $body = @{ text = "🔴 Script Error — Gold scraper hit an unexpected error | [View Logs]($env:RUN_URL)" } | ConvertTo-Json
-          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json" -ErrorAction SilentlyContinue
+          Invoke-RestMethod -Uri $env:WEBHOOK -Method Post -Body $body -ContentType "application/json"

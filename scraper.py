@@ -11,7 +11,9 @@ import logging
 import os
 import re
 import signal
+import ssl
 import sys
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -24,8 +26,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 PAGE_URL = "https://posarrahnugold.ace2u.com/index-landing.php"
 WS_BASE = "wss://posarrahnugoldprodapi.ace2u.com/mygtp.php?version=1.0my&action=pricestream"
 MERCHANT_ID = "POSARRAHNU@PROD"
-TOKEN_REFRESH_INTERVAL = 21_600  # seconds (6 hours)
+TOKEN_REFRESH_INTERVAL = 21_600
 OUTPUT_FILE = "prices.jsonl"
+
+ssl_ctx = ssl.create_default_context()
+ssl_ctx.check_hostname = False
+ssl_ctx.verify_mode = ssl.CERT_NONE
 
 running = True
 total_ticks = 0
@@ -45,9 +51,9 @@ def signal_handler(signum, frame):
         running = False
 
 
-def fetch_jwt() -> str:
+def fetch_jwt(session: requests.Session) -> str:
     log.info("Fetching landing page for JWT token...")
-    resp = requests.get(PAGE_URL, timeout=30, verify=False)
+    resp = session.get(PAGE_URL, timeout=30)
     resp.raise_for_status()
     match = re.search(r"var\s+js_variable\s*=\s*'([^']+)'", resp.text)
     if not match:
@@ -61,12 +67,12 @@ def build_ws_url(token: str) -> str:
     return f"{WS_BASE}&merchant_id={MERCHANT_ID}&access_token={token}"
 
 
-async def connect_and_scrape(token: str):
+async def connect_and_scrape(token: str, fh):
     global total_ticks
     ws_url = build_ws_url(token)
     log.info("Connecting to WebSocket...")
 
-    async with websockets.connect(ws_url, ping_interval=30, ping_timeout=10) as ws:
+    async with websockets.connect(ws_url, ssl=ssl_ctx, ping_interval=30, ping_timeout=10) as ws:
         log.info("WebSocket connected. Waiting for price data...")
         async for message in ws:
             if not running:
@@ -85,9 +91,8 @@ async def connect_and_scrape(token: str):
                     }
                     total_ticks += 1
                     line = json.dumps(entry)
-
-                    with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
-                        f.write(line + "\n")
+                    fh.write(line + "\n")
+                    fh.flush()
 
                     log.info(
                         "[#%d] Buy: RM %.2f/g | Sell: RM %.2f/g",
@@ -111,29 +116,33 @@ async def main():
     log.info("Press Ctrl+C to stop")
     log.info("=" * 50)
 
-    last_token_fetch = 0
+    session = requests.Session()
+    session.verify = False
+
+    last_token_fetch = 0.0
     token = None
 
-    while running:
-        try:
-            now = datetime.now().timestamp()
-            if token is None or (now - last_token_fetch) >= TOKEN_REFRESH_INTERVAL:
-                token = fetch_jwt()
-                last_token_fetch = now
+    with open(OUTPUT_FILE, "a", encoding="utf-8") as fh:
+        while running:
+            try:
+                now = time.monotonic()
+                if token is None or (now - last_token_fetch) >= TOKEN_REFRESH_INTERVAL:
+                    token = fetch_jwt(session)
+                    last_token_fetch = now
 
-            await connect_and_scrape(token)
+                await connect_and_scrape(token, fh)
 
-        except ConnectionClosed as exc:
-            log.warning("WebSocket disconnected (code=%s). Reconnecting in 3s...", exc.code)
-            await asyncio.sleep(3)
+            except ConnectionClosed as exc:
+                log.warning("WebSocket disconnected (code=%s). Reconnecting in 3s...", exc.code)
+                await asyncio.sleep(3)
 
-        except requests.RequestException as exc:
-            log.error("HTTP request failed: %s. Retrying in 10s...", exc)
-            await asyncio.sleep(10)
+            except requests.RequestException as exc:
+                log.error("HTTP request failed: %s. Retrying in 10s...", exc)
+                await asyncio.sleep(10)
 
-        except Exception as exc:
-            log.error("Unexpected error: %s. Retrying in 10s...", exc)
-            await asyncio.sleep(10)
+            except Exception as exc:
+                log.error("Unexpected error: %s. Retrying in 10s...", exc)
+                await asyncio.sleep(10)
 
     log.info("Scraper stopped. Total ticks captured: %d", total_ticks)
 

@@ -21,21 +21,6 @@ jobs:
       - name: Install dependencies
         run: pip install requests websockets
 
-      - name: Diagnostic - check connectivity
-        shell: bash
-        run: |
-          set -e
-          echo "## Python" >> $GITHUB_STEP_SUMMARY
-          python --version >> $GITHUB_STEP_SUMMARY 2>&1
-          echo "## HTTP test (timeout 10s)" >> $GITHUB_STEP_SUMMARY
-          curl -sk --connect-timeout 10 -o /dev/null -w "HTTP %{http_code}\n" https://posarrahnugold.ace2u.com/index-landing.php >> $GITHUB_STEP_SUMMARY 2>&1 || echo "CURL FAILED" >> $GITHUB_STEP_SUMMARY
-          echo "## DNS test" >> $GITHUB_STEP_SUMMARY
-          host posarrahnugoldprodapi.ace2u.com >> $GITHUB_STEP_SUMMARY 2>&1 || echo "DNS FAILED" >> $GITHUB_STEP_SUMMARY
-          echo "## Quick port test" >> $GITHUB_STEP_SUMMARY
-          timeout 5 bash -c 'echo > /dev/tcp/posarrahnugoldprodapi.ace2u.com/443 && echo "PORT 443 OPEN"' 2>&1 >> $GITHUB_STEP_SUMMARY || echo "PORT 443 CLOSED" >> $GITHUB_STEP_SUMMARY
-          echo "## Public IP" >> $GITHUB_STEP_SUMMARY
-          curl -s --connect-timeout 5 https://httpbin.org/ip >> $GITHUB_STEP_SUMMARY 2>&1 || echo "IP CHECK FAILED" >> $GITHUB_STEP_SUMMARY
-
       - name: Capture live gold price
         id: capture
         shell: bash
@@ -44,20 +29,26 @@ jobs:
           python capture_live_price.py 2>&1 | tee /tmp/capture_out.txt
           rc=$?
           set -e
+
           echo "### Script Output (exit code: $rc)" >> $GITHUB_STEP_SUMMARY
           cat /tmp/capture_out.txt >> $GITHUB_STEP_SUMMARY
+
+          echo "exit_code=$rc" >> $GITHUB_OUTPUT
+          if [ $rc -eq 2 ]; then
+            echo "error_type=server" >> $GITHUB_OUTPUT
+          elif [ $rc -eq 1 ]; then
+            echo "error_type=script" >> $GITHUB_OUTPUT
+          fi
+
           if [ $rc -ne 0 ]; then
-            echo "### Python script exited with code $rc" >> $GITHUB_STEP_SUMMARY
             exit $rc
           fi
+
           price=$(grep -oP 'Buy RM \K[\d.]+' /tmp/capture_out.txt | tail -1)
-          if [ -z "$price" ]; then
-            echo "### ERROR: No price found in output" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
           echo "price=$price" >> $GITHUB_OUTPUT
 
       - name: Commit and push data
+        if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -69,7 +60,7 @@ jobs:
           git pull --rebase || true
           git push
 
-      - name: Send Teams Alert - Success
+      - name: Teams Alert — Success
         if: success()
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
@@ -80,12 +71,22 @@ jobs:
             \"text\": \"🟡 Gold Price: RM ${PRICE}/g | [View Run](${RUN_URL})\"
           }" $WEBHOOK
 
-      - name: Send Teams Alert - Failure
-        if: failure()
+      - name: Teams Alert — Server Down
+        if: failure() && steps.capture.outputs.error_type == 'server'
         env:
           WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           curl -H "Content-Type: application/json" -d "{
-            \"text\": \"🔴 Gold Scraper Failed | [View Logs](${RUN_URL})\"
+            \"text\": \"🔴 Server Unreachable — Gold price server is down or timing out | [View Logs](${RUN_URL})\"
+          }" $WEBHOOK
+
+      - name: Teams Alert — Script Error
+        if: failure() && steps.capture.outputs.error_type == 'script'
+        env:
+          WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -H "Content-Type: application/json" -d "{
+            \"text\": \"🔴 Script Error — Gold scraper hit an unexpected error | [View Logs](${RUN_URL})\"
           }" $WEBHOOK

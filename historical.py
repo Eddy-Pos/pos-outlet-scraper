@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 
 import requests
@@ -20,6 +21,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 PAGE_URL = "https://posarrahnugold.ace2u.com/index-landing.php"
 PRIME_URL = "https://posarrahnugold.ace2u.com/controllers/pricehistory-landing.php"
 DATA_URL = "https://posarrahnugold.ace2u.com/custom-data-request.php"
+MAX_RETRIES = 3
+RETRY_DELAY = 3
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,27 +41,58 @@ RANGES = {
 def fetch_historical(range_key: str) -> list[dict]:
     cfg = RANGES[range_key]
 
-    session = requests.Session()
-    session.verify = False
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            if attempt > 1:
+                log.info("Retry %d/%d in %ds...", attempt, MAX_RETRIES, RETRY_DELAY)
+                time.sleep(RETRY_DELAY)
 
-    log.info("Loading landing page for session cookie...")
-    session.get(PAGE_URL, timeout=15)
+            session = requests.Session()
+            session.verify = False
 
-    month, day = cfg["prime"]
-    log.info("Priming data (month=%s, day=%s)...", month, day)
-    session.post(PRIME_URL, data={"month": month, "day": day}, timeout=15)
+            log.info("Loading landing page for session cookie...")
+            resp = session.get(PAGE_URL, timeout=15)
+            resp.raise_for_status()
 
-    log.info("Fetching %s historical data...", cfg["label"])
-    resp = session.post(DATA_URL, data={"type": 8, "id": cfg["id"]}, timeout=15)
-    resp_data = resp.json()
+            month, day = cfg["prime"]
+            log.info("Priming data (month=%s, day=%s)...", month, day)
+            resp = session.post(PRIME_URL, data={"month": month, "day": day}, timeout=15)
+            resp.raise_for_status()
 
-    raw = resp_data.get("data")
-    if not raw:
-        log.warning("No data returned from API")
-        return []
+            log.info("Fetching %s historical data...", cfg["label"])
+            resp = session.post(DATA_URL, data={"type": 8, "id": cfg["id"]}, timeout=15)
+            resp.raise_for_status()
 
-    records = json.loads(raw)
-    return records
+            resp_data = resp.json()
+            raw = resp_data.get("data")
+            if not raw:
+                log.warning("No data returned from API")
+                return []
+
+            if not isinstance(raw, str):
+                log.error("API returned unexpected data type: %s", type(raw).__name__)
+                continue
+
+            records = json.loads(raw)
+            return records
+
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            log.error("Attempt %d/%d failed (server): %s", attempt, MAX_RETRIES, exc)
+            if attempt == MAX_RETRIES:
+                log.error("Server unreachable after %d attempts", MAX_RETRIES)
+                return []
+
+        except (json.JSONDecodeError, ValueError) as exc:
+            log.error("Attempt %d/%d failed (parse): %s", attempt, MAX_RETRIES, exc)
+            if attempt == MAX_RETRIES:
+                return []
+
+        except Exception as exc:
+            log.error("Unexpected error: %s", exc)
+            if attempt == MAX_RETRIES:
+                return []
+
+    return []
 
 
 def save_json(records: list[dict], filepath: str):
